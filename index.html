@@ -1,0 +1,511 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#000000">
+<title>Thermal Printer</title>
+<link rel="preload" href="/fonts/geist.ttf" as="font" type="font/ttf" crossorigin>
+<style>
+  @font-face { font-family: Geist; src: url(/fonts/geist.ttf) format("truetype"); font-weight: 100 900; font-display: swap; }
+  @font-face { font-family: "Geist Mono"; src: url(/fonts/geist-mono.ttf) format("truetype"); font-weight: 100 900; font-display: swap; }
+
+  :root {
+    --bg: #000; --card: #0a0a0a; --hover: #111; --line: #2e2e2e; --line-strong: #454545;
+    --ink: #ededed; --muted: #a1a1a1; --faint: #707070; --blue: #52a8ff; --focus: #0070f3;
+    --ok: #50e3c2; --bad: #ff5b4f; --amber: #f5a623;
+    --mono: "Geist Mono", ui-monospace, Menlo, monospace;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html { background: var(--bg); -webkit-text-size-adjust: 100%; }
+  @media (pointer: fine) { html { overscroll-behavior: none; } }
+  body { margin: 0; color: var(--ink); background: var(--bg); font: 400 14px/1.5 Geist, -apple-system, sans-serif;
+         -webkit-font-smoothing: antialiased; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+  body.dragging { user-select: none; }
+
+  .skip { position: absolute; left: 16px; top: -48px; z-index: 2; padding: 8px 12px; color: #000; background: #fff; border-radius: 6px; }
+  .skip:focus-visible { top: 12px; }
+  :focus-visible { outline: none; box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--focus); }
+
+  .bar { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 16px;
+         height: 64px; padding: 0 24px; background: rgb(0 0 0 / 80%); backdrop-filter: blur(12px);
+         border-bottom: 1px solid var(--line); -webkit-app-region: drag; }
+  .crumbs { display: flex; align-items: center; gap: 10px; min-width: 0; font-weight: 500; letter-spacing: -0.01em; }
+  .emoji { flex: none; font-size: 20px; font-weight: 400; line-height: 1; }
+  .crumbs i { color: var(--line-strong); font-style: normal; font-size: 20px; font-weight: 300; }
+  .crumbs span { color: var(--muted); }
+  .printer { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); white-space: nowrap; }
+  .dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--faint); }
+  .printer .dot { background: var(--bad); }
+  .printer.on .dot { background: var(--ok); }
+
+  main { max-width: 1200px; margin: 0 auto; padding: 40px 24px 64px; }
+  h1 { margin: 0 0 32px; font-size: 32px; line-height: 40px; font-weight: 600; letter-spacing: -0.05em; text-wrap: balance; }
+  .grid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(260px, 1fr); gap: 24px; align-items: start; }
+  @media (max-width: 860px) {
+    .bar { padding-inline: 16px; }
+    main { padding: 24px 16px 48px; }
+    .grid { grid-template-columns: minmax(0, 1fr); }
+  }
+
+  .stack { display: grid; gap: 24px; min-width: 0; }
+  .card { min-width: 0; background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 57px;
+               padding: 12px 16px; border-bottom: 1px solid var(--line); }
+  h2 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
+  h2 label { cursor: inherit; }
+  .card-foot { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 57px;
+               padding: 8px 16px; font-size: 13px; color: var(--muted); background: var(--bg); border-top: 1px solid var(--line); }
+
+  .drop { display: grid; justify-items: center; gap: 4px; margin: 16px; padding: 52px 24px; text-align: center; cursor: pointer;
+          border: 1px dashed var(--line-strong); border-radius: 8px;
+          transition: border-color 150ms, background-color 150ms; }
+  .drop:hover { border-color: var(--muted); background: var(--hover); }
+  .drop:has(input:focus-visible) { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--focus); }
+  body.dragging .drop { border: 1px solid var(--blue); background: rgb(0 112 243 / 12%); }
+  .drop strong { font-size: 16px; font-weight: 600; letter-spacing: -0.02em; text-wrap: balance; }
+  .drop span { font-size: 13px; color: var(--muted); }
+  .drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+  kbd { padding: 1px 5px; font: 12px var(--mono); color: var(--ink); border: 1px solid var(--line); border-radius: 4px; }
+
+  textarea { display: block; width: 100%; min-height: 200px; padding: 16px; resize: vertical; color: var(--ink); background: transparent;
+             border: 0; font: 13px/1.7 var(--mono); }
+  textarea::placeholder { color: var(--faint); }
+  textarea:focus-visible { box-shadow: inset 0 0 0 2px var(--focus); }
+
+  form { margin: 0; }
+  button { display: inline-flex; align-items: center; justify-content: center; height: 40px; padding: 0 12px;
+           font: inherit; font-weight: 500; white-space: nowrap; cursor: pointer; color: #000; background: #ededed;
+           border: 1px solid #ededed; border-radius: 6px; transition: background-color 150ms, border-color 150ms; -webkit-app-region: no-drag; }
+  button:hover { background: #ccc; border-color: #ccc; }
+  button:disabled { color: var(--faint); background: #1a1a1a; border-color: var(--line); cursor: default; }
+  button.secondary { height: 32px; padding: 0 10px; font-size: 13px; color: var(--ink); background: transparent; border-color: var(--line); }
+  button.secondary:hover { background: #1f1f1f; border-color: var(--line-strong); }
+
+  .error { margin: 0; color: var(--bad); font-size: 13px; overflow-wrap: anywhere; }
+  .error:empty { display: none; }
+  .upload-error { padding: 0 16px 16px; }
+
+  #summary { font: 12px/1.4 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+  #jobs { margin: 0; padding: 0; list-style: none; max-height: calc(100dvh - 300px); min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  #jobs:empty { display: none; }
+  @media (max-width: 860px) { #jobs { max-height: none; } }
+  .job { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 12px; align-items: center;
+         min-height: 72px; padding: 12px; transition: background-color 150ms; }
+  .job + .job { border-top: 1px solid var(--line); }
+  .job:hover { background: var(--hover); }
+  .job img { display: block; width: 40px; height: auto; background: #fff; border-radius: 2px; }
+  .info { min-width: 0; }
+  .name { font-weight: 500; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .meta { font: 12px/1.4 var(--mono); color: var(--faint); font-variant-numeric: tabular-nums; }
+  .job-error { display: block; color: var(--bad); font-family: Geist, sans-serif; overflow-wrap: anywhere; }
+  .state { display: flex; align-items: center; gap: 6px; margin-top: 2px; font-size: 12px; color: var(--muted); }
+  .state .dot { width: 8px; height: 8px; }
+  .state.queued .dot { background: var(--faint); }
+  .state.printing { color: var(--ink); }
+  .state.printing .dot { background: var(--amber); animation: pulse 1.2s ease-in-out infinite; }
+  .state.done .dot { background: var(--ok); }
+  .state.failed { color: var(--bad); }
+  .state.failed .dot { background: var(--bad); }
+  @keyframes pulse { 50% { opacity: 0.3; } }
+  .job-actions { display: flex; flex-direction: column; gap: 6px; justify-self: end; }
+  button.small { height: 32px; padding: 0 10px; font-size: 13px; }
+  .queue-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+  .queue-actions:has(button:not([hidden])) { flex: 1; }
+  #summary { white-space: nowrap; }
+  .state.held .dot { background: var(--blue); }
+
+  .adjust { display: grid; grid-template-columns: 224px minmax(0, 1fr); gap: 24px; padding: 16px; }
+  @media (max-width: 620px) { .adjust { grid-template-columns: minmax(0, 1fr); } }
+  .sheet { display: grid; place-items: center; align-self: start; max-width: 224px; min-height: 160px;
+           background: #fff; border-radius: 2px; }
+  .sheet img { display: block; width: 224px; height: auto; }
+  .sheet:has(img:not([hidden])) { min-height: 0; }
+  .sheet img[hidden] { display: none; }
+  .sheet span { padding: 16px; font-size: 13px; text-align: center; color: #666; }
+  .sliders { display: grid; align-content: start; gap: 18px; min-width: 0; }
+  .slider { display: grid; gap: 6px; }
+  .slider label { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; color: var(--muted); }
+  output { font: 12px/1.6 var(--mono); color: var(--ink); font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; height: 20px; margin: 0; accent-color: #ededed; background: transparent; cursor: pointer; border-radius: 4px; }
+  .toggle { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); cursor: pointer; }
+  .toggle:hover { color: var(--ink); }
+  .toggle input { appearance: none; position: relative; flex: none; width: 32px; height: 18px; margin: 0; cursor: pointer;
+                  background: var(--line-strong); border-radius: 9px; transition: background-color 150ms; }
+  .toggle input::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px;
+                         background: #ededed; border-radius: 50%; transition: transform 150ms; }
+  .toggle input:checked { background: var(--ink); }
+  .toggle input:checked::after { background: #000; transform: translateX(14px); }
+  .empty { margin: 0; padding: 72px 16px; text-align: center; color: var(--muted); }
+  .empty strong { display: block; color: var(--ink); font-size: 14px; font-weight: 600; }
+  #jobs:not(:empty) + .empty { display: none; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; }
+    .state.printing .dot { animation: none; }
+  }
+</style>
+</head>
+<body>
+<a class="skip" href="#content">Skip to Content</a>
+
+<header class="bar">
+  <div class="crumbs" translate="no">
+    <b class="emoji" aria-hidden="true">🖨️</b>
+    Thermal Printer <i aria-hidden="true">/</i> <span>GP-L80160</span>
+  </div>
+  <div class="printer" id="printer" role="status" aria-live="polite">
+    <i class="dot" aria-hidden="true"></i><span id="printerText">Checking Printer…</span>
+  </div>
+</header>
+
+<main id="content">
+  <h1>Print</h1>
+  <div class="grid">
+    <div class="stack">
+      <section class="card">
+        <div class="card-head">
+          <h2>Upload</h2>
+          <label class="toggle">
+            <input type="checkbox" id="autoprint" name="autoprint" role="switch">
+            Auto Print
+          </label>
+        </div>
+        <label class="drop" id="drop">
+          <input type="file" id="files" name="files" aria-label="Choose files to print"
+                 accept="image/jpeg,image/png,image/webp,.svg,.md,.markdown,.txt" multiple>
+          <strong id="dropTitle">Drop Files to Print</strong>
+          <span>Photos, SVGs, Markdown or text. Click to browse, or paste with <kbd>⌘&nbsp;V</kbd>.</span>
+        </label>
+        <p class="error upload-error" id="fileError" aria-live="polite"></p>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>Adjustments</h2>
+          <button class="secondary" id="reset" type="button">Reset</button>
+        </div>
+        <div class="adjust">
+          <div class="sheet">
+            <img id="adjustPreview" alt="Preview of the latest photo with these settings" width="448" height="600" hidden>
+            <span id="adjustEmpty">Upload a photo to preview it here.</span>
+          </div>
+          <div class="sliders">
+            <div class="slider">
+              <label for="exposure">Exposure <output id="exposureValue" for="exposure"></output></label>
+              <input type="range" id="exposure" name="exposure" min="-1.5" max="1.5" step="0.1">
+            </div>
+            <div class="slider">
+              <label for="contrast">Contrast <output id="contrastValue" for="contrast"></output></label>
+              <input type="range" id="contrast" name="contrast" min="0.5" max="1.5" step="0.05">
+            </div>
+            <div class="slider">
+              <label for="gamma">Gamma <output id="gammaValue" for="gamma"></output></label>
+              <input type="range" id="gamma" name="gamma" min="0.5" max="1.3" step="0.05">
+            </div>
+            <div class="slider">
+              <label for="cutoff">Levels Clip <output id="cutoffValue" for="cutoff"></output></label>
+              <input type="range" id="cutoff" name="cutoff" min="0" max="5" step="0.5">
+            </div>
+            <div class="slider">
+              <label for="delay">Row Delay <output id="delayValue" for="delay"></output></label>
+              <input type="range" id="delay" name="delay" min="10" max="60" step="1">
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="caption" name="caption" role="switch">
+              Print Settings Under Photo
+            </label>
+          </div>
+        </div>
+        <div class="card-foot">
+          <span id="adjustHint">Applies to new photos.</span>
+          <button type="button" id="reprint" disabled>Reprint Photo</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <form id="paste">
+          <div class="card-head"><h2><label for="text">Markdown</label></h2></div>
+          <textarea id="text" name="text" autocomplete="off" aria-describedby="textHint"
+                    placeholder="# Heading&#10;&#10;Write here: **bold**, *italic*, - bullets…"></textarea>
+          <div class="card-foot">
+            <span id="textHint">Headings, lists, quotes &amp; code print to scale.</span>
+            <button type="submit" id="textButton">Print Text</button>
+          </div>
+          <p class="error upload-error" id="textError" aria-live="polite"></p>
+        </form>
+      </section>
+    </div>
+
+    <section class="card" aria-label="Print queue">
+      <div class="card-head">
+        <div>
+          <h2>Queue</h2>
+          <div id="summary" aria-live="polite">0 queued</div>
+        </div>
+        <div class="queue-actions">
+          <button class="secondary" id="clear" hidden>Clear Finished</button>
+          <button class="small" id="printAll" hidden>Print All</button>
+        </div>
+      </div>
+      <ul id="jobs"></ul>
+      <p class="empty"><strong>No Prints Yet</strong>Add a file or some text to get started.</p>
+    </section>
+  </div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const LABELS = { held: "Ready", queued: "Queued", printing: "Printing…", done: "Printed", failed: "Failed", cancelled: "Cancelled" };
+const DOTS_PER_MM = 8;
+const SLIDERS = ["exposure", "contrast", "gamma", "cutoff", "delay"];
+const rows = new Map();
+let drags = 0;
+let latestPhoto = null;
+let adjustTimer;
+let defaultSettings;
+
+async function upload(files, errorId) {
+  $(errorId).textContent = "";
+  for (const file of files) {
+    try {
+      const response = await fetch("/jobs?name=" + encodeURIComponent(file.name), { method: "POST", body: file });
+      if (!response.ok) {
+        const body = await response.json();
+        $(errorId).textContent = file.name + ": " + body.error;
+      }
+    } catch {
+      $(errorId).textContent = file.name + ": the app isn’t responding. Reopen it and try again.";
+    }
+    refresh();
+  }
+}
+
+function row(job) {
+  if (rows.has(job.id)) return rows.get(job.id);
+  const li = document.createElement("li");
+  li.className = "job";
+  const img = document.createElement("img");
+  img.src = "/jobs/" + job.id + "/preview";
+  img.alt = "Print preview of " + job.name;
+  img.width = 448;
+  img.height = job.height;
+  const info = document.createElement("div");
+  info.className = "info";
+  const name = document.createElement("div");
+  name.className = "name";
+  name.textContent = job.name;
+  name.title = job.name;
+  const meta = document.createElement("div");
+  meta.className = "meta";
+  meta.textContent = new Intl.NumberFormat().format(Math.round(job.height / DOTS_PER_MM)) + " mm";
+  const failure = document.createElement("span");
+  failure.className = "job-error";
+  const state = document.createElement("div");
+  const dot = document.createElement("i");
+  dot.className = "dot";
+  dot.setAttribute("aria-hidden", "true");
+  const label = document.createElement("span");
+  state.append(dot, label);
+  const stop = document.createElement("button");
+  stop.className = "secondary";
+  stop.textContent = "Stop";
+  stop.setAttribute("aria-label", "Stop " + job.name);
+  stop.onclick = () => fetch("/jobs/" + job.id + "/cancel", { method: "POST" }).then(refresh);
+  const print = document.createElement("button");
+  print.className = "small";
+  print.textContent = "Print";
+  print.setAttribute("aria-label", "Print " + job.name);
+  print.onclick = async () => {
+    await saveSettings();
+    await fetch("/jobs/" + job.id + "/print", { method: "POST" });
+    img.src = "/jobs/" + job.id + "/preview?printed=1";
+    refresh();
+  };
+  const actions = document.createElement("div");
+  actions.className = "job-actions";
+  actions.append(print, stop);
+  meta.append(failure);
+  info.append(name, meta, state);
+  li.append(img, info, actions);
+  const entry = { li, state, label, stop, print, failure };
+  rows.set(job.id, entry);
+  return entry;
+}
+
+async function refresh() {
+  let data;
+  try {
+    data = await (await fetch("/jobs")).json();
+  } catch {
+    $("printer").classList.remove("on");
+    $("printerText").textContent = "App Not Running";
+    return;
+  }
+  $("printer").classList.toggle("on", data.connected);
+  const status = data.connected ? "Connected" : "Printer Not Found";
+  if ($("printerText").textContent !== status) $("printerText").textContent = status;
+
+  for (const [id, entry] of rows) {
+    if (!data.jobs.some((job) => job.id === id)) {
+      entry.li.remove();
+      rows.delete(id);
+    }
+  }
+  for (const job of data.jobs) {
+    const entry = row(job);
+    if (entry.label.textContent !== LABELS[job.state]) entry.label.textContent = LABELS[job.state];
+    entry.state.className = "state " + job.state;
+    entry.failure.textContent = job.error || "";
+    entry.stop.hidden = !["held", "queued", "printing"].includes(job.state);
+    entry.print.hidden = job.state !== "held";
+    const stopLabel = job.state === "held" ? "Remove" : "Stop";
+    if (entry.stop.textContent !== stopLabel) entry.stop.textContent = stopLabel;
+    if (!entry.li.isConnected) $("jobs").append(entry.li);
+  }
+  const held = data.jobs.filter((job) => job.state === "held");
+  const printing = data.jobs.filter((job) => job.state === "queued" || job.state === "printing").length;
+  const number = new Intl.NumberFormat();
+  const summary = held.length ? number.format(held.length) + " ready, " + number.format(printing) + " queued"
+    : number.format(printing) + " queued";
+  if ($("summary").textContent !== summary) $("summary").textContent = summary;
+  $("clear").hidden = data.jobs.length === printing + held.length;
+  $("printAll").hidden = held.length === 0;
+  $("printAll").onclick = async () => {
+    await saveSettings();
+    for (const job of held) await fetch("/jobs/" + job.id + "/print", { method: "POST" });
+    for (const job of held) rows.get(job.id)?.li.querySelector("img").setAttribute("src", "/jobs/" + job.id + "/preview?printed=1");
+    refresh();
+  };
+  if (data.photo !== latestPhoto) {
+    latestPhoto = data.photo;
+    $("reprint").disabled = !latestPhoto;
+    $("adjustHint").textContent = latestPhoto ? latestPhoto : "Applies to new photos.";
+    updatePreview();
+  }
+}
+
+function currentSettings() {
+  return {
+    ...Object.fromEntries(SLIDERS.map((id) => [id, $(id).value])),
+    caption: $("caption").checked,
+    autoprint: $("autoprint").checked,
+  };
+}
+
+function showAutoPrint() {
+  const auto = $("autoprint").checked;
+  $("dropTitle").textContent = auto ? "Drop Files to Print" : "Drop Files to Add";
+  $("textButton").textContent = auto ? "Print Text" : "Add to Queue";
+}
+
+function showValues() {
+  const exposure = Number($("exposure").value);
+  $("exposureValue").textContent = (exposure > 0 ? "+" : exposure < 0 ? "−" : "") + Math.abs(exposure).toFixed(1) + " EV";
+  $("contrastValue").textContent = Number($("contrast").value).toFixed(2);
+  $("gammaValue").textContent = Number($("gamma").value).toFixed(2);
+  $("cutoffValue").textContent = Number($("cutoff").value).toFixed(1) + "%";
+  $("delayValue").textContent = Math.round($("delay").value) + " ms";
+}
+
+function updatePreview() {
+  if (!latestPhoto) return;
+  $("adjustPreview").src = "/adjust/preview?" + new URLSearchParams(currentSettings()) + "&photo=" + encodeURIComponent(latestPhoto);
+  $("adjustPreview").hidden = false;
+  $("adjustEmpty").hidden = true;
+}
+
+function saveSettings() {
+  return fetch("/settings", { method: "POST", body: JSON.stringify(currentSettings()) });
+}
+
+function applySettings(settings) {
+  for (const id of SLIDERS) $(id).value = settings[id];
+  $("caption").checked = settings.caption;
+  $("autoprint").checked = settings.autoprint;
+  showAutoPrint();
+  showValues();
+}
+
+for (const id of SLIDERS) {
+  $(id).oninput = () => {
+    showValues();
+    clearTimeout(adjustTimer);
+    adjustTimer = setTimeout(() => { saveSettings(); updatePreview(); }, 120);
+  };
+}
+
+$("caption").onchange = () => { saveSettings(); updatePreview(); };
+$("autoprint").onchange = () => { showAutoPrint(); saveSettings(); };
+
+$("reset").onclick = () => {
+  applySettings(defaultSettings);
+  saveSettings();
+  updatePreview();
+};
+
+$("reprint").onclick = async () => {
+  await saveSettings();
+  await fetch("/adjust/print", { method: "POST" });
+  refresh();
+};
+
+fetch("/settings").then((response) => response.json()).then((data) => {
+  defaultSettings = data.defaults;
+  applySettings(data.settings);
+});
+
+$("files").onchange = (event) => { upload([...event.target.files], "fileError"); event.target.value = ""; };
+
+$("paste").onsubmit = (event) => {
+  event.preventDefault();
+  const text = $("text").value;
+  if (!text.trim()) {
+    $("textError").textContent = "Type or paste some text first.";
+    $("text").focus();
+    return;
+  }
+  upload([new File([text], "Pasted text.md")], "textError");
+  $("text").value = "";
+};
+
+$("clear").onclick = () => fetch("/jobs/clear", { method: "POST" }).then(refresh);
+
+// Pasting anywhere outside a text field adds the clipboard to the queue.
+addEventListener("paste", (event) => {
+  const target = event.target;
+  if (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) return;
+  const files = [...event.clipboardData.files].map((file) =>
+    file.name && file.name !== "image.png" ? file : new File([file], "Pasted image." + (file.type.split("/")[1] || "png"), { type: file.type }));
+  if (files.length) {
+    event.preventDefault();
+    upload(files, "fileError");
+    return;
+  }
+  const text = event.clipboardData.getData("text/plain");
+  if (text.trim()) {
+    event.preventDefault();
+    $("text").value = text;
+    $("text").focus();
+  }
+});
+
+// The whole page is a drop target, so a near miss can't open the file instead.
+addEventListener("dragenter", (event) => { event.preventDefault(); drags++; document.body.classList.add("dragging"); });
+addEventListener("dragover", (event) => event.preventDefault());
+addEventListener("dragleave", () => { if (--drags <= 0) { drags = 0; document.body.classList.remove("dragging"); } });
+addEventListener("drop", (event) => {
+  event.preventDefault();
+  drags = 0;
+  document.body.classList.remove("dragging");
+  upload([...event.dataTransfer.files], "fileError");
+});
+
+refresh();
+setInterval(refresh, 1000);
+</script>
+</body>
+</html>
